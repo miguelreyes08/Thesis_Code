@@ -1,0 +1,531 @@
+---
+title: "Thesis"
+author: "Miguel Reyes"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# National Health and Nutrition Examination Survey
+
+```{r libraries,echo= TRUE}
+library(nhanesA)
+library(readr)
+library(predtools)
+library(magrittr)
+library(dplyr)
+library(ggnewscale)
+#library(caret)
+library(InformationValue)
+library(ISLR)
+library(cvms)
+library(tibble)
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
+# install.packages("remotes")
+# remotes::install_github("ML4LHS/runway")
+library(runway)
+library(ggmosaic)
+
+setwd("~/Semester 2/Research project/Db")
+```
+
+## Demo
+
+### Demographic Variables & Sample Weights
+*	RIAGENDR – Gender
+*	RIDAGEYR - Age at Screening Adjudicated – Recode
+*	RIDAGEMN - Age in Months
+*	RIDRETH2 - Linked NH3 Race/Ethnicity - Recode
+*	DMDEDUC - Education - Recode (old version)
+*	INDHHINC - Annual Household Income
+
+```{r}
+#nhanesTableVars('DEMO', 'DEMO')
+demo  <- nhanes('DEMO')
+select_cols <- c('SEQN', 'RIAGENDR', 'RIDAGEYR', 'RIDRETH2', 'DMDEDUC', 'INDHHINC')
+demo <- demo[,select_cols]
+colSums(is.na(demo))
+demo <- demo[complete.cases(demo),]
+```
+
+
+### Body Measures (BMX)
+
+•	BMXWT - Weight (kg)
+•	BMXRECUM - Recumbent Length (cm)
+•	BMXHEAD - Head Circumference (cm)
+•	BMXHT - Standing Height (cm)
+•	BMXBMI - Body Mass Index (kg/m**2)
+•	BMXLEG - Upper Leg Length (cm)
+•	BMXCALF - Maximal Calf Circumference (cm)
+•	BMXARML - Upper Arm Length (cm)
+•	BMXARMC - Arm Circumference (cm)
+•	BMXWAIST - Waist Circumference (cm)
+•	BMXTHICR - Thigh Circumference (cm)
+•	BMXTRI - Triceps Skinfold (mm)
+•	BMXSUB - Subscapular Skinfold (mm)
+
+```{r}
+#### Examination Data ####
+# Body Measures (BMX)
+#nhanesTableVars('EXAM', 'BMX')
+bmx  <- nhanes('BMX')
+select_cols <- c('SEQN', 'BMXWT', 'BMXHT', 'BMXBMI', 'BMXLEG'
+                 , 'BMXCALF', 'BMXARML', 'BMXARMC', 'BMXWAIST', 'BMXTHICR', 'BMXTRI'
+                 , 'BMXSUB')
+bmx <- bmx[,select_cols]
+bmx <- bmx[complete.cases(bmx),]
+colSums(is.na(bmx))
+```
+
+
+## Laboratory Data
+
+### Albumin & Creatinine – Urine (LAB16)
+* All
+
+```{r}
+lab16  <- nhanes('LAB16')
+select_cols <- c('SEQN', 'URXUMA')
+lab16 <- lab16[,select_cols]
+colSums(is.na(lab16))
+lab16 <- lab16[complete.cases(lab16),]
+```
+
+### Blood Pressure (BPX)
+
+•	PEASCTM1 - Blood Pressure Time in Seconds
+•	BPQ150A - Have you had any of the following in the past 30 minutes?: Food
+•	BPQ150B - Had alcohol in the past 30 minutes?
+•	BPQ150C - Had coffee in the past 30 minutes?
+•	BPQ150D - Had cigarettes in the past 30 minutes?
+•	BPAARM - Arm selected
+•	BPACSZ - Coded cuff size
+•	BPXPLS - 60 sec. pulse (30 sec. pulse * 2)
+•	BPXPULS - Pulse regular or irregular?
+•	BPXML1 - MIL: maximum inflation levels (mm Hg)
+•	BPXSAR - SBP average reported to examinee
+•	BPXDAR - DBP average reported to examinee
+
+```{r}
+bpx  <- nhanes('BPX')
+select_cols <- c('SEQN', 'PEASCTM1', 'BPXPLS','BPXML1','BPXSAR','BPXDAR')
+bpx <- bpx[,select_cols]
+colSums(is.na(bpx))
+bpx <- bpx[complete.cases(bpx),]
+```
+
+
+### Glycohemoglobin (LAB10)
+* All
+```{r}
+lab10  <- nhanes('LAB10')
+colSums(is.na(lab10))
+lab10 <- lab10[complete.cases(lab10),]
+```
+
+
+
+```{r}
+################
+#NHANES VERSION#
+################
+
+setwd("~/Semester 2/Research project/Db")
+srvyin <- paste("NHANES_1999_2000_MORT_2019_PUBLIC.dat")   # full .DAT name here
+srvyout <- "NHANES_1999" # shorthand dataset name here
+
+# Example syntax:
+#srvyin <- paste("NHANES_1999_2000_MORT_2019_PUBLIC.dat")   
+#srvyout <- "NHANES_1999_2000"      
+
+# read in the fixed-width format ASCII file
+dsn <- read_fwf(file=srvyin,
+                col_types = "iiiiiiii",
+                fwf_cols(seqn = c(1,6),
+                         eligstat = c(15,15),
+                         mortstat = c(16,16),
+                         ucod_leading = c(17,19),
+                         diabetes = c(20,20),
+                         hyperten = c(21,21),
+                         permth_int = c(43,45),
+                         permth_exm = c(46,48)
+                ),
+                na = c("", ".")
+)
+
+
+assign(paste0(srvyout), dsn)
+rm(dsn, srvyin, srvyout)
+```
+
+
+```{r}
+NHANES_1999<- NHANES_1999 %>% 
+       mutate(d_months = case_when((NHANES_1999$eligstat ==1 & NHANES_1999$permth_exm < 120 ) ~ 1,
+                                   (NHANES_1999$eligstat ==1 & NHANES_1999$permth_exm == NA ) ~ 100,
+                                              TRUE ~ 0)) 
+NHANES_1999 <- NHANES_1999 %>%
+  naniar::replace_with_na(replace = list(x = c(100)))
+
+NHANES_1999$mortstat <- NHANES_1999$d_months
+```
+
+```{r}
+# Mortality
+select_cols <- c('seqn', 'mortstat')
+NHANES_1999 <- NHANES_1999[,select_cols]
+colSums(is.na(NHANES_1999))
+NHANES_1999 <- NHANES_1999[complete.cases(NHANES_1999),]
+```
+
+
+# Mergin data
+
+```{r}
+
+# Body Measures (BMX)
+merger <- merge(demo, bmx)
+
+merger<-merge(NHANES_1999, merger, by.x = 'seqn' , by.y = 'SEQN', all = TRUE)
+
+# Albumin & Creatinine •	URXUMA      kidney disease
+merger<-merge(merger, lab16, by.x = 'seqn' , by.y = 'SEQN', all = FALSE)
+
+# Blood Pressure (BPX)
+merger<-merge(merger, bpx, by.x = 'seqn' , by.y = 'SEQN', all = FALSE)
+
+# Glycohemoglobin (lab10)
+merger<-merge(merger, lab10, by.x = 'seqn' , by.y = 'SEQN', all = FALSE)
+
+
+#defined before
+
+merger <- merger[complete.cases(merger),]
+
+merger$seqn=NULL
+colSums(is.na(merger))
+merger$RIDRETH2 <- as.factor(merger$RIDRETH2)
+merger$RIAGENDR <- as.factor(merger$RIAGENDR)
+head(merger)
+```
+
+```{r}
+# Color by groups
+library(ggplot2)
+library(ggmosaic)
+select_cols <- c('mortstat','RIDAGEYR','DMDEDUC','BPXDAR','BPXSAR','BMXARMC','BMXWAIST','RIAGENDR','URXUMA','BPXPLS')
+descr_data <- merger[,select_cols]
+descr_data$mortstat<-as.factor(descr_data$mortstat)
+descr_data$RIAGENDR<- recode(descr_data$RIAGENDR, '1' = "Male",'2' = "Female")
+# p1 <- ggplot2::ggplot(data = mydata, aes(x = intvar1, y = intvar2)) + geom_point() + ggtitle("Graph title")
+# RIAGENDR
+descr_data$DMDEDUC<-as.factor(descr_data$DMDEDUC)
+ggplot(data = descr_data) +
+  geom_mosaic(aes(x = product(RIAGENDR,y=mortstat), fill=RIAGENDR)) +  labs(title='Gender',x='Dead within 10 years',y='Gender') + scale_fill_manual(values = c('#56B4E9', "#FF9999")) +guides(fill=guide_legend(title="Gender"))+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16))
+
+# RIDAGEYR
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = RIDAGEYR, group=mortstat,color=mortstat)) + geom_boxplot() + ggtitle("Age") +  labs(title='RIDAGEYR = Age',x='Dead within 10 years',y='Age')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years"))
+p2 <- ggplot(descr_data, aes(x = RIDAGEYR, fill = mortstat)) + geom_histogram() + ggtitle("Age") +  labs(title='RIDAGEYR = Age',x='',y='Age')+ theme(axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))
+p1
+p2
+# BPXDAR
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = BPXDAR, group=mortstat,color=mortstat)) + geom_boxplot() +
+  labs(title='BPXDAR = SBD average reported',x='Dead within 10 years',y='SBD')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years"))
+p2 <- ggplot(descr_data, aes(x = BPXDAR, fill = mortstat)) + geom_histogram() +labs(title='BPXDAR = SBD average reported',x='',y='SBD')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))
+p1
+p2
+# BPXSAR
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = BPXSAR, group=mortstat,color=mortstat)) + geom_boxplot() + labs(title='BPXSAR = SBP average reported',x='Dead within 10 years',y='SBP')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years"))
+p2 <- ggplot(descr_data, aes(x = BPXSAR, fill = mortstat)) + geom_histogram()  + labs(title='BPXSAR = SBP average reported',x='',y='SBP')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))
+p1
+p2
+# BMXARMC
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = BMXARMC, group=mortstat,color=mortstat)) + geom_boxplot() +  labs(title="BMXARMC = Arm Circumference",x='Dead within 10 years',y='Arm Circumference')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years"))
+p2 <- ggplot(descr_data, aes(x = BMXARMC, fill = mortstat)) + geom_histogram() +  labs(title='BMXARMC = Arm Circumference',x='',y='Arm Circumference')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))
+p1
+p2
+# BMXWAIST
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = BMXWAIST, group=mortstat,color=mortstat)) + geom_boxplot() +  labs(title="BMXWAIST = Waist Circumference",x='Dead within 10 years',y='Waist Circumference')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years"))
+p2 <- ggplot(descr_data, aes(x = BMXWAIST, fill = mortstat)) + geom_histogram() +  labs(title="BMXWAIST = Waist Circumference",x='',y='Waist Circumference')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))
+p1
+p2
+# URXUMA
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = URXUMA, group=mortstat,color=mortstat)) + geom_boxplot() +  labs(title="URXUMA = Albumin & Creatinine",x='Dead within 10 years',y='Albumin & Creatinine')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years"))+ ylim(0, 100)
+p2 <- ggplot(descr_data, aes(x = URXUMA, fill = mortstat)) + geom_histogram()+ xlim(0, 100) +  labs(title="URXUMA = Albumin & Creatinine",x='',y='Albumin & Creatinine')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))
+p1
+p2
+
+# BPXPLS
+p1 <- ggplot2::ggplot(data = descr_data, aes(x = mortstat, y = BPXPLS, group=mortstat,color=mortstat)) + geom_boxplot() +  labs(title="BPXPLS =60 sec. ",x='Dead within 10 years',y='60 sec. pulse')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(color=guide_legend(title="Dead within 10 years")) + ylim(0, 100)
+p2 <- ggplot(descr_data, aes(x = BPXPLS, fill = mortstat)) + geom_histogram() + labs(title="BPXPLS =60 sec. pulse ",x='',y='60 sec. pulse')+ theme(axis.text.x = element_text(size = 12),axis.text.y = element_text(size = 12),  
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16) ) +guides(fill=guide_legend(title="Dead within 10 years"))+xlim(0, 100)
+p1
+p2
+```
+
+
+
+# First attempt 
+
+```{r}
+# Loading package
+library(caTools)
+library(ROCR) 
+set.seed(12345)
+
+# Splitting dataset
+split <- sample.split(merger, SplitRatio = 0.5)
+
+   
+train_reg <- subset(merger, split == "TRUE")
+test_reg <- subset(merger, split == "FALSE")
+   
+# Training model
+logistic_model <- glm(mortstat ~ .,
+                      data = train_reg,
+                      family = "binomial")
+
+intercept_only <- glm(mortstat ~ 1, data=train_reg,
+                      family = "binomial")
+all <- glm(mortstat ~ ., data=train_reg,
+                      family = "binomial")
+logistic_model <- step(intercept_only, direction='forward', scope=formula(all), trace=0)
+
+# Summary
+summary(logistic_model)
+   
+# Predict test data based on model
+predict_reg <- predict(logistic_model, 
+                       test_reg, type = "response")
+
+# Changing probabilities
+optimal <- optimalCutoff(test_reg$mortstat, predict_reg, optimiseFor = "misclasserror")[1]
+
+predict_reg <- ifelse(predict_reg >optimal, 1, 0)
+print(optimal)
+# Evaluating model accuracy
+# using confusion matrix
+table(test_reg$mortstat, predict_reg)
+missing_classerr <- mean(predict_reg != test_reg$mortstat)
+tidy(logistic_model)
+```
+
+
+
+```{r}
+tab_matrix<-table(tibble("Actual" = test_reg$mortstat,
+       "prediction" = predict_reg))
+cfm <- as_tibble(tab_matrix)
+plot_confusion_matrix(cfm, 
+                      target_col = "Actual", 
+                      prediction_col = "prediction",
+                      counts_col = "n")
+```
+
+```{r}
+library(randomForest)
+library(datasets)
+#library(caret)
+#install.packages('datasets')
+model1 <- randomForest(mortstat ~ ., data = train_reg, importance = TRUE,ntree=500)
+
+predTest <- predict(model1, test_reg, type = "response")
+optimal <- optimalCutoff(test_reg$mortstat, predTest,optimiseFor = "misclasserror")[1]
+optimal
+predTest <- ifelse(predTest >optimal, 1, 0)
+tab_matrix<-table(tibble("prediction" = predTest,"Actual" = test_reg$mortstat))
+cfm <- as_tibble(tab_matrix)
+plot_confusion_matrix(cfm, 
+                      target_col = "Actual", 
+                      prediction_col = "prediction",
+                      counts_col = "n")
+```
+
+```{r}
+
+plot(model1, col='red',main="Random Forest")
+```
+
+
+
+```{r}
+test_reg$Regression   <- predict(logistic_model, test_reg, type = "response")
+calibration_plot(data = test_reg, obs = "mortstat", pred = "Regression", title = "Calibration plot for Regression model")
+
+test_reg$RandomForest <- predict(model1, test_reg, type = "response")
+calibration_plot(data = test_reg, obs = "mortstat", pred = "RandomForest", title = "Calibration plot for RandomForest model")
+```
+
+```{r}
+
+cal_plot(test_reg, outcome='mortstat',prediction='Regression')
+cal_plot(test_reg, outcome='mortstat',prediction='RandomForest')
+
+```
+
+```{r}
+library(ROCR)
+library(pROC)
+pred <- prediction(test_reg$Regression, test_reg$mortstat)
+perf <- performance(pred,"tpr","fpr")
+#plot(perf,colorize=TRUE, title = "plot for regression model")
+
+pred <- prediction(test_reg$RandomForest, test_reg$mortstat)
+perf2 <- performance(pred,"tpr","fpr")
+#plot(perf2,colorize=TRUE, title = "plot for RandomForest model")
+
+rocobj <- roc(test_reg$mortstat, test_reg$Regression)
+ggroc(rocobj)
+
+plot(perf, col='red', xlab="1-Specificity", ylab="Sensitivity")
+plot(perf2, add = TRUE, col='green')
+legend("bottomright", 95, legend=c("Logistic Regression", "Random Forest"),
+       col=c("red", "green"), lty=1, cex=1)
+
+pred <- prediction(test_reg$Regression, test_reg$mortstat)
+auc.tmp<-performance(pred,"auc")
+auc_regression <- as.numeric(auc.tmp@y.values)
+pred <- prediction(test_reg$RandomForest, test_reg$mortstat)
+auc.tmp<-performance(pred,"auc")
+auc_raforest <- as.numeric(auc.tmp@y.values)
+  
+auc_regression
+auc_raforest
+```
+#### SIMULATION ####
+
+```{r warning=FALSE}
+# Taking the sample
+set.seed(145)
+auc_reg=vector()
+auc_for=vector()
+
+n_sim=500
+
+for (i in 1:n_sim){
+  sample_nhanes <-sample_n(merger, 2000, replace = FALSE)
+
+  # Split train and test
+  split <- sample.split(sample_nhanes, SplitRatio = 0.7)
+  train <- subset(sample_nhanes, split == "TRUE")
+  test <- subset(sample_nhanes, split == "FALSE")
+  
+  # stepwise regression
+  intercept_only <- glm(mortstat ~ 1, data=train,
+                      family = "binomial")
+  all <- glm(mortstat ~ ., data=train,
+                      family = "binomial")
+  regression_model <- step(intercept_only, direction='forward', scope=formula(all), trace=0)
+  
+  # Random forest
+  forest_model <- randomForest(mortstat ~ ., data = train, importance = TRUE)
+  
+  #auc
+  test$Regression <- predict(regression_model, test, type = "response")
+  test$Forest <- predict(forest_model, test, type = "response")
+  
+  
+  pred <- prediction(test$Regression, test$mortstat)
+  auc.tmp<-performance(pred,"auc")
+  auc_regression <- as.numeric(auc.tmp@y.values)
+  auc_reg[i] <- auc_regression
+  
+  pred <- prediction(test$Forest, test$mortstat)
+  auc.tmp<-performance(pred,"auc")
+  auc_forest <- as.numeric(auc.tmp@y.values)
+  auc_for[i]<-auc_forest
+}
+
+mean(auc_reg)
+mean(auc_for)
+
+```
+
+```{r}
+cum_auc_reg <- cumsum(auc_reg) / seq_along(auc_reg)
+cum_auc_for <- cumsum(auc_for) / seq_along(auc_for)
+
+
+plot(1:500, cum_auc_reg,
+main="AUC average",
+ylab="AUC average",
+xlab="number of simulations",
+ylim = c(0.78,1),
+type="l",
+col="red")
+lines(1:500,cum_auc_for, col="blue")
+legend("topright",
+c("Logistic Regression","Random Forest"),
+fill=c("red","blue")
+)
+
+```
+```{r}
+sample_size<-c(250,500,750,1000,1250,1500,1750,2000)
+auc_r<-c(0.8349055,0.9055964,0.9118371,0.9179247,0.9165847,0.9190276,0.9211192,0.9215774)
+auc_f<-c(0.8863919,0.9054373,0.9098305,0.9120371,0.9133123,0.9145869,0.9172978,0.9168623)
+
+performance_r_f<-data.frame(sample_size,auc_r,auc_f)
+
+knitr::kable(performance_r_f)
+```
+
+
+```{r}
+linear_reg <- lm(auc_r ~ sample_size, data=performance_r_f)
+knitr::kable(tidy(linear_reg))
+linear_for <- lm(auc_f ~ sample_size, data=performance_r_f)
+knitr::kable(tidy(linear_for))
+```
+```{r}
+p <- ggplot(performance_r_f,aes(sample_size, auc_r,col='Regression')) +
+  geom_smooth(method='lm', formula= y~x) +
+  new_scale_color() +
+  geom_smooth(aes(sample_size, auc_f,col='Random Forest'),method='lm', formula= y~x,alpha=.3) +
+  scale_color_manual(values = c("blue"))+
+  labs(title = "", x = "Sample size", y = "AUC")
+p
+```
+```{r}
+p <- ggplot(performance_r_f,aes(sample_size, auc_r,col='Regression')) + geom_point() +
+  new_scale_color() + geom_point(aes(sample_size, auc_f,col='Random Forest')) +
+  scale_color_manual(values = c("blue"))+
+  labs(title = "", x = "Sample size", y = "AUC")
+p
+```
+
